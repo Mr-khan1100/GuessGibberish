@@ -232,9 +232,8 @@ wss.on('connection', ws => {
 
   ws.on('close', () => {
     if (!room) return;
-    clearInterval(room.timer);
     room.players = room.players.filter(p => p.name !== pname);
-    if (room.players.length === 0) { rooms.delete(room.code); return; }
+    if (room.players.length === 0) { clearInterval(room.timer); rooms.delete(room.code); return; }
     if (!room.players.find(p => p.isHost)) {
       room.players[0].isHost = true;
       send(room.players[0].ws, { type: 'host_transferred' });
