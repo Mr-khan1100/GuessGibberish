@@ -55,6 +55,19 @@
     input[type=text]::placeholder { color: #ADB5BD; font-weight: 400; }
     input[type=text]:disabled { opacity: .45; cursor: not-allowed; }
 
+    select {
+      width: 100%;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--rad);
+      color: var(--txt);
+      padding: 10px 13px;
+      font-size: 14px; font-family: inherit; font-weight: 700;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.1); }
+
     .btn {
       cursor: pointer; font-size: 14px; font-family: inherit; font-weight: 700;
       padding: 10px 22px; border-radius: var(--rad);
@@ -112,6 +125,14 @@
 
     .wait-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     #wait-status { font-size: 13px; color: var(--txt2); }
+    .lobby-settings {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    .setting-control { min-width: 190px; }
 
     /* ── GAME SCREEN ── */
     .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; gap: 1rem; }
@@ -262,6 +283,17 @@
     </div>
     <p class="section-label">Players in room</p>
     <div id="w-players" class="players-grid" style="margin-bottom:1.25rem;"></div>
+    <div class="lobby-settings" id="host-settings" style="display:none;">
+      <div class="setting-control">
+        <p class="field-label">Difficulty</p>
+        <select id="sel-difficulty">
+          <option value="easy" selected>Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+          <option value="mixed">Mixed</option>
+        </select>
+      </div>
+    </div>
     <div class="wait-actions">
       <button class="btn btn-primary" id="btn-start" onclick="handleStart()" style="display:none;">🚀 Start Game</button>
       <p id="wait-status">Waiting for host to start...</p>
@@ -276,11 +308,12 @@
     <div class="top-bar">
       <div style="display:flex;gap:8px;align-items:center;">
         <span class="round-pill" id="g-round">Round 1</span>
+        <span class="round-pill" id="g-difficulty">Easy</span>
         <span class="card-counter-pill" id="g-counter">Card 1 / 15</span>
       </div>
       <div class="timer-wrap">
         <div class="timer-track"><div id="timer-bar"></div></div>
-        <span id="timer-num">15</span>
+        <span id="timer-num">30</span>
       </div>
     </div>
 
@@ -401,7 +434,8 @@ function animateConfetti() {
 }
 
 // ── STATE ────────────────────────────────────────────────────────────────────
-let ws, myName, roomCode, isHost = false, hasAnswered = false, totalPlayers = 1;
+let ws, myName, roomCode, isHost = false, hasAnswered = false, totalPlayers = 1, currentDifficulty = 'easy';
+let audioCtx = null;
 const MEDALS = ['🥇','🥈','🥉'];
 
 // ── UTILS ────────────────────────────────────────────────────────────────────
@@ -421,6 +455,52 @@ function setError(msg) { document.getElementById('join-error').textContent = msg
 
 function wsSend(type, data = {}) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, ...data }));
+}
+
+const DIFFICULTY_LABELS = { easy: 'Easy', medium: 'Medium', hard: 'Hard', mixed: 'Mixed' };
+
+function difficultyLabel(value) {
+  return DIFFICULTY_LABELS[value] || DIFFICULTY_LABELS.easy;
+}
+
+function getAudioContext() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!audioCtx) audioCtx = new AudioContextClass();
+  return audioCtx;
+}
+
+function unlockAudio() {
+  const ctx = getAudioContext();
+  if (!ctx || ctx.state !== 'suspended') return;
+  const resume = ctx.resume();
+  if (resume && typeof resume.catch === 'function') resume.catch(() => {});
+}
+
+function playRevealTone() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    const resume = ctx.resume();
+    if (resume && typeof resume.then === 'function') resume.then(playRevealTone).catch(() => {});
+    return;
+  }
+
+  const now = ctx.currentTime;
+  [523.25, 659.25, 783.99].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const start = now + i * 0.07;
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.12, start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.2);
+  });
 }
 
 // ── WEBSOCKET ────────────────────────────────────────────────────────────────
@@ -459,7 +539,9 @@ function connect() {
 
       case 'game_started':
         hasAnswered = false;
+        currentDifficulty = msg.difficulty || 'easy';
         document.getElementById('g-round').textContent = `Round ${msg.roundNum}`;
+        document.getElementById('g-difficulty').textContent = difficultyLabel(currentDifficulty);
         showScreen('s-game');
         resetCardUI();
         break;
@@ -476,10 +558,11 @@ function connect() {
       case 'timer_tick':
         updateTimer(msg.timeLeft);
         if (msg.timeLeft <= 0) {
+          const doneText = msg.reason === 'all_answered' ? 'All answers in! Revealing answers...' : 'Time\'s up! Revealing answers...';
           document.getElementById('chat-input').disabled = true;
           document.getElementById('btn-send').disabled   = true;
-          document.getElementById('chat-status-text').textContent = '⏰ Time\'s up! Revealing answers...';
-          document.getElementById('g-hint').textContent  = "⏰ time's up";
+          document.getElementById('chat-status-text').textContent = doneText;
+          document.getElementById('g-hint').textContent  = msg.reason === 'all_answered' ? 'all answers in' : "time's up";
           document.getElementById('g-hint').classList.add('pulse');
         }
         break;
@@ -496,6 +579,7 @@ function connect() {
         break;
 
       case 'reveal':
+        playRevealTone();
         document.getElementById('g-answer').textContent = msg.answer;
         document.getElementById('card-flip').classList.add('flipped');
         renderReveal(msg.results);
@@ -533,6 +617,8 @@ function connect() {
 
       case 'restarted':
         totalPlayers = msg.players.length;
+        currentDifficulty = 'easy';
+        document.getElementById('sel-difficulty').value = 'easy';
         renderPlayers(msg.players);
         updateHostControls();
         showScreen('s-waiting');
@@ -543,6 +629,7 @@ function connect() {
 
 // ── JOIN ──────────────────────────────────────────────────────────────────────
 function handleJoin() {
+  unlockAudio();
   const name = document.getElementById('inp-name').value.trim();
   const code = document.getElementById('inp-code').value.trim().toUpperCase();
   setError('');
@@ -559,8 +646,16 @@ document.getElementById('inp-code').addEventListener('input', e => { e.target.va
 function updateHostControls() {
   const btn    = document.getElementById('btn-start');
   const status = document.getElementById('wait-status');
-  if (isHost) { btn.style.display = 'inline-flex'; status.textContent = 'You are the host — start when ready!'; }
-  else        { btn.style.display = 'none';        status.textContent = 'Waiting for host to start...'; }
+  const settings = document.getElementById('host-settings');
+  if (isHost) {
+    btn.style.display = 'inline-flex';
+    settings.style.display = 'flex';
+    status.textContent = 'You are the host — start when ready!';
+  } else {
+    btn.style.display = 'none';
+    settings.style.display = 'none';
+    status.textContent = 'Waiting for host to start...';
+  }
 }
 
 function renderPlayers(players) {
@@ -574,7 +669,11 @@ function renderPlayers(players) {
   });
 }
 
-function handleStart() { wsSend('start'); }
+function handleStart() {
+  unlockAudio();
+  const difficulty = document.getElementById('sel-difficulty').value || 'easy';
+  wsSend('start', { difficulty });
+}
 
 // ── GAME ──────────────────────────────────────────────────────────────────────
 function resetCardUI() {
@@ -602,6 +701,7 @@ function updateTimer(t) {
 }
 
 function handleChat() {
+  unlockAudio();
   const inp  = document.getElementById('chat-input');
   const text = inp.value.trim();
   if (!text || hasAnswered) return;

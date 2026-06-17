@@ -6,12 +6,13 @@ A real-time multiplayer party game where players decode phonetic nonsense phrase
 
 1. One player creates a room and shares the 4-letter room code with friends
 2. Up to 15 players join the same room
-3. Each round plays through 15 cards. Each card shows a gibberish phrase — sound it out!
-4. **Type your answer** in the chat box. Your answer is hidden from other players until the timer ends
-5. When the 15-second timer runs out, the card automatically flips to reveal the answer, and everyone's answers are shown simultaneously
-6. **You cannot type after the timer ends**
-7. Scoring: first correct answer = **2 points**, all other correct answers = **1 point**
-8. After 3 rounds (36 cards total), the player with the most points wins
+3. The host chooses a difficulty before starting. Easy is selected by default
+4. Each round plays through up to 15 cards. Each card shows a gibberish phrase - sound it out!
+5. **Type your answer** in the chat box. Your answer is hidden from other players until the timer ends
+6. When the 30-second timer runs out, or when every player has submitted, the card automatically flips to reveal the answer, and everyone's answers are shown simultaneously
+7. **You cannot type after the timer ends**
+8. Scoring: first correct answer = **2 points**, all other correct answers = **1 point**
+9. The player with the most points wins
 
 ## Example
 
@@ -63,4 +64,5 @@ To host publicly, deploy to any Node.js host (Railway, Render, Fly.io) or run be
 - Answers are auto-scored by normalized text match (case-insensitive, punctuation-ignored)
 - One answer per player per card
 - Typing is disabled once the timer reaches zero
+- Cards reveal early when every player has submitted
 - The host controls "Next Card" and "Next Round" progression
